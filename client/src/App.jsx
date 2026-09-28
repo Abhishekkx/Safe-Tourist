@@ -212,7 +212,7 @@ export default function App() {
   const incomingPending = incidents.filter((i) => i.status === 'PENDING').slice(0, 3);
 
   return (
-    <div className={`min-h-screen flex flex-col bg-[#f8fafc] dark:bg-[#090d16] text-slate-900 dark:text-slate-100 ${theme === 'dark' ? 'dark' : ''}`}>
+    <div className={`min-h-screen flex flex-col bg-[#f8fafc] dark:bg-[#090d16] text-slate-900 dark:text-slate-100 overflow-x-hidden w-full max-w-full ${theme === 'dark' ? 'dark' : ''}`}>
       
       <OfflineNotice onAutoSynced={fetchIncidents} />
 
