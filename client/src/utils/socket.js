@@ -1,10 +1,14 @@
 import { io } from 'socket.io-client';
 
-const URL = window.location.hostname === 'localhost' ? 'http://localhost:5000' : '/';
+// Connect to live Render backend URL or localhost in development
+const URL =
+  window.location.hostname === 'localhost'
+    ? 'http://localhost:5000'
+    : 'https://safe-tourist-oktn.onrender.com';
 
 export const socket = io(URL, {
   autoConnect: true,
-  transports: ['websocket', 'polling'], // Prefer WebSocket immediately to eliminate polling transport upgrades
+  transports: ['websocket', 'polling'],
   reconnectionAttempts: 10,
   reconnectionDelay: 2000,
 });
