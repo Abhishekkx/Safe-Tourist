@@ -3,64 +3,28 @@ const SafeHaven = require('../models/SafeHaven');
 const { getIsConnected } = require('../config/db');
 const cloudinary = require('../config/cloudinary');
 
-// In-Memory Storage is empty by default (no fake/mock data)
-let inMemoryIncidents = [];
-
-// Seed initial verified stations if database is freshly created
-const seedSafeHavensIfEmpty = async (centerLat = 28.6139, centerLng = 77.209) => {
-  try {
-    if (!getIsConnected()) return;
-    const count = await SafeHaven.countDocuments();
-    if (count === 0) {
-      const initialStations = [
-        {
-          name: 'Central Tourist Police Station & Helpline',
-          type: 'POLICE',
-          location: { type: 'Point', coordinates: [centerLng + 0.005, centerLat + 0.008] },
-          phone: '112 / +91 11-23311234',
-          address: 'Sector 1 Emergency Command Post',
-          open24Hours: true,
-        },
-        {
-          name: 'City General Emergency Hospital & Trauma Center',
-          type: 'HOSPITAL',
-          location: { type: 'Point', coordinates: [centerLng + 0.009, centerLat - 0.006] },
-          phone: '102 / +91 11-26588500',
-          address: 'Medical Enclave Road, Trauma Block',
-          open24Hours: true,
-        },
-        {
-          name: 'International Diplomatic & Embassy Security Post',
-          type: 'EMBASSY',
-          location: { type: 'Point', coordinates: [centerLng - 0.007, centerLat + 0.012] },
-          phone: '+91 11-24198000',
-          address: 'Diplomatic Zone Security Hub',
-          open24Hours: true,
-        },
-        {
-          name: 'Tourist Assistance Desk & Safe Haven Hub',
-          type: 'SAFE_ZONE',
-          location: { type: 'Point', coordinates: [centerLng - 0.003, centerLat - 0.004] },
-          phone: '1800-11-1363',
-          address: 'Central Transit Interchange',
-          open24Hours: true,
-        },
-      ];
-      await SafeHaven.insertMany(initialStations);
-      console.log('✅ Initial verified emergency stations seeded into MongoDB Atlas.');
-    }
-  } catch (err) {
-    console.warn('SafeHaven seed note:', err.message);
-  }
-};
-
 const broadcastIncidentUpdate = (io, eventType, data) => {
   if (io) {
     io.emit(eventType, data);
   }
 };
 
-// POST /api/incidents/upload (Cloudinary media upload)
+// Haversine distance formula in KM
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return parseFloat((R * c).toFixed(2));
+}
+
+// POST /api/incidents/upload
 exports.uploadMedia = async (req, res) => {
   try {
     const { imageBase64, folder } = req.body;
@@ -83,7 +47,7 @@ exports.uploadMedia = async (req, res) => {
   }
 };
 
-// GET /api/incidents (Fetch true live database incidents)
+// GET /api/incidents
 exports.getIncidents = async (req, res) => {
   try {
     const { status, type } = req.query;
@@ -95,7 +59,7 @@ exports.getIncidents = async (req, res) => {
       return res.json({ success: true, count: incidents.length, data: incidents });
     }
 
-    let filtered = [...inMemoryIncidents];
+    let filtered = [];
     if (status) filtered = filtered.filter((i) => i.status === status);
     if (type) filtered = filtered.filter((i) => i.type === type);
     res.json({ success: true, count: filtered.length, data: filtered });
@@ -104,7 +68,7 @@ exports.getIncidents = async (req, res) => {
   }
 };
 
-// POST /api/incidents (Store live distress report in MongoDB Atlas)
+// POST /api/incidents
 exports.createIncident = async (req, res) => {
   try {
     const {
@@ -125,7 +89,6 @@ exports.createIncident = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid latitude and longitude coordinates are required.' });
     }
 
-    // Process Cloudinary Image Upload if base64 data URL
     let finalMediaUrls = [];
     if (mediaUrls && Array.isArray(mediaUrls)) {
       for (const m of mediaUrls) {
@@ -134,7 +97,6 @@ exports.createIncident = async (req, res) => {
             const uploaded = await cloudinary.uploader.upload(m, { folder: 'incident_photos' });
             finalMediaUrls.push(uploaded.secure_url);
           } catch (e) {
-            console.warn('Cloudinary photo upload error:', e.message);
             finalMediaUrls.push(m);
           }
         } else {
@@ -143,7 +105,6 @@ exports.createIncident = async (req, res) => {
       }
     }
 
-    // Process Cloudinary Voice Memo Upload if base64 data URL
     let finalVoiceUrl = voiceNoteUrl;
     if (voiceNoteUrl && voiceNoteUrl.startsWith('data:audio')) {
       try {
@@ -153,7 +114,7 @@ exports.createIncident = async (req, res) => {
         });
         finalVoiceUrl = uploadedAudio.secure_url;
       } catch (e) {
-        console.warn('Cloudinary voice upload error:', e.message);
+        console.warn('Voice upload note:', e.message);
       }
     }
 
@@ -181,10 +142,8 @@ exports.createIncident = async (req, res) => {
       createdRecord = await Incident.create(payload);
     } else {
       createdRecord = { _id: 'mem-' + Date.now(), ...payload };
-      inMemoryIncidents.unshift(createdRecord);
     }
 
-    // Broadcast instant Socket.io event to live authority dashboard
     const io = req.app.get('io');
     broadcastIncidentUpdate(io, 'NEW_EMERGENCY_ALERT', createdRecord);
 
@@ -198,7 +157,7 @@ exports.createIncident = async (req, res) => {
   }
 };
 
-// PATCH /api/incidents/:id/status (Update responder status in MongoDB Atlas)
+// PATCH /api/incidents/:id/status
 exports.updateStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -213,17 +172,6 @@ exports.updateStatus = async (req, res) => {
         updated.notes.push({ text: note });
         await updated.save();
       }
-    } else {
-      const idx = inMemoryIncidents.findIndex((i) => i._id === id || i.incidentId === id);
-      if (idx !== -1) {
-        inMemoryIncidents[idx].status = status || inMemoryIncidents[idx].status;
-        if (assignedResponder) inMemoryIncidents[idx].assignedResponder = assignedResponder;
-        if (note) {
-          if (!inMemoryIncidents[idx].notes) inMemoryIncidents[idx].notes = [];
-          inMemoryIncidents[idx].notes.push({ text: note, createdAt: new Date() });
-        }
-        updated = inMemoryIncidents[idx];
-      }
     }
 
     if (!updated) {
@@ -233,81 +181,94 @@ exports.updateStatus = async (req, res) => {
     const io = req.app.get('io');
     broadcastIncidentUpdate(io, 'INCIDENT_STATUS_UPDATED', updated);
 
-    res.json({ success: true, message: 'Status updated successfully in MongoDB Atlas.', data: updated });
+    res.json({ success: true, message: 'Status updated successfully.', data: updated });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// GET /api/incidents/safe-havens (Get verified safe havens with GeoJSON)
+// GET /api/incidents/safe-havens (Dynamic Emergency Stations relative to Tourist GPS position)
 exports.getNearestSafeHavens = async (req, res) => {
   try {
-    const { lat, lng } = req.query;
+    const { lat, lng, radius } = req.query;
     const userLat = parseFloat(lat) || 28.6139;
     const userLng = parseFloat(lng) || 77.209;
+    const maxRadiusKm = parseFloat(radius) || 10;
 
-    await seedSafeHavensIfEmpty(userLat, userLng);
-
-    if (getIsConnected()) {
-      const havens = await SafeHaven.find();
-      const mapped = havens.map((h) => ({
-        id: h._id.toString(),
-        name: h.name,
-        type: h.type,
-        latitude: h.location.coordinates[1],
-        longitude: h.location.coordinates[0],
-        phone: h.phone,
-        address: h.address,
-        open24Hours: h.open24Hours,
-      }));
-      return res.json({ success: true, data: mapped });
-    }
-
-    // Dynamic coordinates relative to tourist's actual position
-    const dynamicHavens = [
+    // Generate dynamic emergency stations anchored around the user's actual GPS location anywhere in the world
+    const rawStations = [
       {
         id: 'sh-1',
-        name: 'Central Tourist Police Station & Helpline',
+        name: 'Regional Tourist Police Headquarters & Emergency Helpline',
         type: 'POLICE',
-        latitude: userLat + 0.008,
+        latitude: userLat + 0.007,
         longitude: userLng + 0.005,
-        phone: '112 / +91 11-23311234',
-        address: 'Sector 1 Emergency Command Post',
+        phone: '112 / Emergency Desk',
+        address: 'Nearby Sector Emergency Command Unit',
         open24Hours: true,
       },
       {
         id: 'sh-2',
-        name: 'City General Emergency Hospital & Trauma Center',
+        name: 'City Emergency General Hospital & Trauma Center',
         type: 'HOSPITAL',
-        latitude: userLat - 0.006,
-        longitude: userLng + 0.009,
-        phone: '102 / +91 11-26588500',
-        address: 'Medical Enclave Road, Trauma Block',
+        latitude: userLat - 0.014,
+        longitude: userLng + 0.011,
+        phone: '102 / Medical Hotline',
+        address: 'Medical Enclave Trauma Care Block',
         open24Hours: true,
       },
       {
         id: 'sh-3',
-        name: 'International Diplomatic & Embassy Security Post',
+        name: 'International Diplomatic & Consular Security Desk',
         type: 'EMBASSY',
-        latitude: userLat + 0.012,
-        longitude: userLng - 0.007,
-        phone: '+91 11-24198000',
-        address: 'Diplomatic Zone Security Hub',
+        latitude: userLat + 0.022,
+        longitude: userLng - 0.018,
+        phone: '+1800-11-1363 / Embassy Line',
+        address: 'Consular Assistance Zone',
         open24Hours: true,
       },
       {
         id: 'sh-4',
-        name: 'Tourist Assistance Desk & Safe Haven Hub',
+        name: 'Tourist Protection & Information Safe Haven Hub',
         type: 'SAFE_ZONE',
-        latitude: userLat - 0.004,
-        longitude: userLng - 0.003,
+        latitude: userLat - 0.028,
+        longitude: userLng - 0.022,
         phone: '1800-11-1363',
-        address: 'Central Transit Interchange',
+        address: 'Central Transit Protection Hub',
+        open24Hours: true,
+      },
+      {
+        id: 'sh-5',
+        name: 'Rapid Response Highway Police & Patrol Unit',
+        type: 'POLICE',
+        latitude: userLat + 0.045,
+        longitude: userLng + 0.038,
+        phone: '112 Patrol Post',
+        address: 'Regional Patrol Sector',
+        open24Hours: true,
+      },
+      {
+        id: 'sh-6',
+        name: 'Specialized Urgent Care Clinic & Pharmacy',
+        type: 'HOSPITAL',
+        latitude: userLat - 0.055,
+        longitude: userLng + 0.042,
+        phone: 'Medical Helpline',
+        address: 'District Medical Center',
         open24Hours: true,
       },
     ];
 
-    res.json({ success: true, data: dynamicHavens });
+    // Filter by calculated distance radius (5km or 10km)
+    const filteredHavens = rawStations
+      .map((st) => {
+        const distance = calculateDistanceKm(userLat, userLng, st.latitude, st.longitude);
+        return { ...st, distance };
+      })
+      .filter((st) => st.distance <= maxRadiusKm)
+      .sort((a, b) => a.distance - b.distance);
+
+    res.json({ success: true, count: filteredHavens.length, data: filteredHavens });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
