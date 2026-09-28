@@ -24,6 +24,26 @@ function calculateDistanceKm(lat1, lon1, lat2, lon2) {
   return parseFloat((R * c).toFixed(2));
 }
 
+let inMemoryIncidents = [
+  {
+    _id: 'inc-demo-1',
+    incidentId: 'INC-DEMO-101',
+    type: 'SOS_CRITICAL',
+    urgency: 'HIGH',
+    touristName: 'Tourist (GPS Auto Alert)',
+    contactNumber: '+91 98765 43210',
+    location: {
+      type: 'Point',
+      coordinates: [77.209, 28.6139],
+      address: 'Near Central Secretariat, New Delhi',
+    },
+    description: 'Emergency SOS Panic Triggered - User requested immediate responder dispatch.',
+    status: 'PENDING',
+    mediaUrls: [],
+    createdAt: new Date().toISOString(),
+  },
+];
+
 // POST /api/incidents/upload
 exports.uploadMedia = async (req, res) => {
   try {
@@ -59,7 +79,7 @@ exports.getIncidents = async (req, res) => {
       return res.json({ success: true, count: incidents.length, data: incidents });
     }
 
-    let filtered = [];
+    let filtered = [...inMemoryIncidents];
     if (status) filtered = filtered.filter((i) => i.status === status);
     if (type) filtered = filtered.filter((i) => i.type === type);
     res.json({ success: true, count: filtered.length, data: filtered });

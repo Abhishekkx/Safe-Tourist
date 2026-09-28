@@ -69,15 +69,16 @@ export default function App() {
   const fetchIncidents = async () => {
     try {
       const res = await fetch('/api/incidents');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data.success) {
+      if (data && data.success) {
         setIncidents(deduplicate(data.data));
         if (data.data.length > 0 && !selectedIncident) {
           setSelectedIncident(data.data[0]);
         }
       }
     } catch (err) {
-      console.warn('Backend server offline, relying on socket stream');
+      console.warn('Backend server offline, relying on socket stream / local state');
     }
   };
 
