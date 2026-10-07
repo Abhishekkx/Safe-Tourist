@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import Navbar from './components/Navbar';
 import SOSButton from './components/SOSButton';
 import EmergencySidebar from './components/EmergencySidebar';
@@ -607,6 +608,7 @@ export default function App() {
         <p>SafeTourist Platform &copy; 2026. Emergency Response & Spatial Coordination Center.</p>
       </footer>
 
+      <SpeedInsights />
     </div>
   );
 }
